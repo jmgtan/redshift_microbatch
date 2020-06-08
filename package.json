@@ -1,0 +1,14 @@
+{
+  "name": "redshiftloader",
+  "version": "1.0.0",
+  "description": "Generates manifest file and loads into target Redshift cluster",
+  "main": "loader.js",
+  "author": "Jan Tan",
+  "license": "ISC",
+  "dependencies": {
+    "array.chunk": "^1.1.0",
+    "aws-sdk": "^2.677.0",
+    "pg": "^8.2.0",
+    "uuid": "^8.0.0"
+  }
+}
