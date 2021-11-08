@@ -132,8 +132,6 @@ exports.handler = async (event) => {
 
         sqls.push(util.format("DROP TABLE %s", copyStagingTableName));
 
-        console.log(sqls);
-
         const execResp = await rsData.batchExecuteStatement({
             ClusterIdentifier: clusterIdentifier,
             Database: clusterDb,
