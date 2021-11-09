@@ -66,7 +66,7 @@ exports.handler = async (event) => {
             if (body && body.Records && body.Records.length > 0) {
                 const s3 = body.Records[0].s3;
                 const bucketName = s3.bucket.name;
-                const objectName = s3.object.key;
+                const objectName = decodeURIComponent(s3.object.key);
     
                 manifest.entries.push({
                     "url": "s3://"+bucketName+"/"+objectName,
@@ -94,17 +94,6 @@ exports.handler = async (event) => {
         }
 
         await s3.putObject(generateManifestParams).promise();
-
-        // const clusterCredentials = await rs.getClusterCredentials({
-        //     ClusterIdentifier: clusterIdentifier,
-        //     DbUser: clusterUsername,
-        //     AutoCreate: true,
-        //     DbName: clusterDb
-        // }).promise();
-
-        // const clusterDetails = await rs.describeClusters({
-        //     ClusterIdentifier: clusterIdentifier
-        // }).promise();
 
         const rsData = new AWS.RedshiftData();
         var sqls = [
