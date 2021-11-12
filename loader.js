@@ -97,7 +97,7 @@ exports.handler = async (event) => {
 
         const rsData = new AWS.RedshiftData();
         var sqls = [
-            util.format("CREATE TABLE %s as select * from %s where 1=2", copyStagingTableName, copyTableName),
+            util.format("CREATE TEMP TABLE %s as select * from %s where 1=2", copyStagingTableName, copyTableName),
             util.format("COPY %s from 's3://%s/%s' iam_role '%s' format as parquet manifest %s", copyStagingTableName, manifestBucket, manifestKey, copyRoleArn, copyOptions),
         ];
 

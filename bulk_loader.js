@@ -23,7 +23,7 @@ exports.handler = async (event) => {
             const copyStagingTableName = copyTableName+"_"+Date.now();
 
             var sqls = [
-                util.format("CREATE TABLE %s as select * from %s where 1=2", copyStagingTableName, copyTableName),
+                util.format("CREATE TEMP TABLE %s as select * from %s where 1=2", copyStagingTableName, copyTableName),
                 util.format("COPY %s from '%s' iam_role '%s' format as parquet", copyStagingTableName, s3Path, copyRoleArn),
             ];
 
