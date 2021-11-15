@@ -69,14 +69,14 @@ The following are the relevant environment variables per Lambda function:
 - `loader.handler`
     - `CONFIG_BUCKET`: the bucket name where the JSON config files are stored. Just provide the bucket name, **DO NOT INCLUDE `s3://`**.
     - `CONFIG_PREFIX`: the folder where the JSON config files are stored. Example: `path/to/config/`.
-- `retry_loader.hander`
+- `retry_microbatch.hander`
     - `COPY_IAM_ROLE_ARN`: the ARN of the Redshift IAM Role to be used for the `COPY` command.
 
 ### Lambda Timeouts
 The following are the timeout configuration per Lambda function:
 
 - `loader.handler`: 2 minutes
-- `retry_loader.hander`: 2 minutes
+- `retry_microbatch.hander`: 2 minutes
 
 ## Bulk Loader
 
@@ -113,4 +113,4 @@ The following is the input structure for the bulk loader:
 ### Lambda Timeouts
 The following are the timeout configuration per Lambda function:
 
-- `retry_microbatch.handler`: 5 minutes
+- `bulk_loader.handler`: 5 minutes
