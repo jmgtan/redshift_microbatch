@@ -6,7 +6,6 @@
   "author": "Jan Tan",
   "license": "ISC",
   "dependencies": {
-    "array.chunk": "^1.1.0",
     "aws-sdk": "^2.1022.0",
     "uuid": "^8.3.2"
   }

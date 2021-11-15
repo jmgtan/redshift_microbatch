@@ -23,12 +23,14 @@ exports.handler = async (event) => {
             const copyStagingTableName = copyTableName+"_"+Date.now();
 
             var sqls = [
+                util.format("LOCK %s", copyTableName),
                 util.format("CREATE TEMP TABLE %s as select * from %s where 1=2", copyStagingTableName, copyTableName),
                 util.format("COPY %s from '%s' iam_role '%s' format as parquet", copyStagingTableName, s3Path, copyRoleArn),
             ];
 
             if (mergeDuplicatePks) {
-                sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s", copyTableName, copyStagingTableName, copyTableName, mergePk, copyStagingTableName, mergePk));
+                sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s and %s.%s < %s.%s", copyTableName, copyStagingTableName, copyTableName, mergePk, copyStagingTableName, mergePk, copyTableName, mergeTimestamp, copyStagingTableName, mergeTimestamp));
+                sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s and %s.%s >= %s.%s", copyStagingTableName, copyTableName, copyStagingTableName, mergePk, copyTableName, mergePk, copyTableName, mergeTimestamp, copyStagingTableName, mergeTimestamp));
             } else {
                 sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s and %s.%s=%s.%s", copyTableName, copyStagingTableName, copyTableName, mergePk, copyStagingTableName, mergePk, copyTableName, mergeTimestamp, copyStagingTableName, mergeTimestamp));
             }
