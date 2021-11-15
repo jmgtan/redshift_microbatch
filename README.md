@@ -113,4 +113,4 @@ The following is the input structure for the bulk loader:
 ### Lambda Timeouts
 The following are the timeout configuration per Lambda function:
 
-- `loader.handler`: 5 minutes
+- `retry_microbatch.handler`: 5 minutes
