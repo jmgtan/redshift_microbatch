@@ -1,15 +1,8 @@
 const AWS = require("aws-sdk");
 const util = require("util");
 const VALID_ERROR_TO_RETRY = "Serializable isolation violation";
-const WAIT_TIME = 30000;
 const RS_DATA_USER = "redshift_data_api_user";
 const COPY_IAM_ROLE_ARN = process.env.COPY_IAM_ROLE_ARN;
-
-const sleep = async (ms) => {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    })
-}
 
 exports.handler = async (event) => {
     const rsData = new AWS.RedshiftData();
@@ -36,8 +29,6 @@ exports.handler = async (event) => {
 
                 sqls.push(queryString);
             }
-
-            sleep(WAIT_TIME);
 
             const execResp = await rsData.batchExecuteStatement({
                 ClusterIdentifier: statementDetails.ClusterIdentifier,

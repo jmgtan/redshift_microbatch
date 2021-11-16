@@ -3,25 +3,33 @@ const util = require("util");
 const {v4:uuidv4} = require("uuid");
 
 const RS_DATA_USER = "redshift_data_api_user";
-const WAIT_TIME = 30000;
 const configCache = {};
 const manifestCache = {};
 const s3 = new AWS.S3();
 const rsData = new AWS.RedshiftData();
+const ddb = new AWS.DynamoDB();
 const collectedResponse = [];
 
-var configBucket = process.env.CONFIG_BUCKET;
+const configBucket = process.env.CONFIG_BUCKET;
 var configPrefix = process.env.CONFIG_PREFIX;
+
+if (!configPrefix.endsWith("/")) {
+    configPrefix += "/";
+}
+
+const pendingBucket = process.env.PENDING_BUCKET;
+var pendingPrefix = process.env.PENDING_PREFIX;
+
+if (!pendingPrefix.endsWith("/")) {
+    pendingPrefix += "/";
+}
+
+const DDB_TRACKER = process.env.DDB_TRACKER;
 
 const loadConfigForQueue = async (eventSourceARN) => {
     const queue = eventSourceARN.substr(eventSourceARN.lastIndexOf(":") + 1);
 
     if (!(queue in configCache)) {
-
-        if (!configPrefix.endsWith("/")) {
-            configPrefix += "/";
-        }
-
         const configKey = configPrefix + queue + ".json";
         const configResponse = await s3.getObject({Bucket: configBucket, Key: configKey}).promise();
         const config = JSON.parse(configResponse.Body.toString());
@@ -32,10 +40,56 @@ const loadConfigForQueue = async (eventSourceARN) => {
     return configCache[queue];
 }
 
-const sleep = async (ms) => {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    })
+const trackExecution = async(dbName, tableName, statementName) => {
+    await ddb.putItem({
+        "TableName": DDB_TRACKER,
+        "Item": {
+            "db_table": {
+                "S": dbName + "#" + tableName
+            },
+            "status_timestamp": {
+                "S": "RUNNING"
+            },
+            "statement_name": {
+                "S": statementName
+            }
+        },
+        "ConditionExpression": "attribute_not_exists(db_table) and attribute_not_exists(status_timestamp)"
+    }).promise();
+}
+
+const queueLoad = async(dbName, tableName, loadPayload) => {
+    const statementName = loadPayload.StatementName;
+    const statementNamePrefix = dbName+"/";
+    const partialStatementName = statementName.substr(statementName.indexOf(statementNamePrefix) + statementNamePrefix.length);
+
+    const pendingKey = pendingPrefix + dbName + "/" + tableName + "/" + partialStatementName + ".json";
+
+    await s3.putObject({
+        Bucket: pendingBucket,
+        Key: pendingKey,
+        Body: JSON.stringify(loadPayload)
+    }).promise();
+
+    const params = {
+        "TableName": DDB_TRACKER,
+        "Item": {
+            "db_table": {
+                "S": dbName + "#" + tableName
+            },
+            "status_timestamp": {
+                "S": "PENDING#" + statementName
+            },
+            "payload_bucket": {
+                "S": pendingBucket
+            },
+            "payload_key": {
+                "S": pendingKey
+            }
+        }
+    }
+
+    await ddb.putItem(params).promise();
 }
 
 exports.handler = async (event) => {
@@ -74,7 +128,6 @@ exports.handler = async (event) => {
         }
 
         if (Object.keys(manifestCache).length > 0) {
-            await sleep(WAIT_TIME);
             for (eventSourceARN in manifestCache) {
                 const config = await loadConfigForQueue(eventSourceARN);
 
@@ -128,22 +181,35 @@ exports.handler = async (event) => {
                 ));
         
                 sqls.push(util.format("DROP TABLE %s", copyStagingTableName));
-        
-                const execResp = await rsData.batchExecuteStatement({
-                    ClusterIdentifier: clusterIdentifier,
-                    Database: clusterDb,
-                    Sqls: sqls,
-                    DbUser: RS_DATA_USER,
-                    StatementName: statementName,
-                    WithEvent: true
-                }).promise();
 
-                collectedResponse.push({
-                    "table_name": copyTableName,
-                    "statement_name": statementName,
-                    "statement_id": execResp.Id,
-                    "manifest_file": manifestKey
-                });
+                
+                try {
+                    await trackExecution(clusterDb, copyTableName, statementName);
+                    const execResp = await rsData.batchExecuteStatement({
+                        ClusterIdentifier: clusterIdentifier,
+                        Database: clusterDb,
+                        Sqls: sqls,
+                        DbUser: RS_DATA_USER,
+                        StatementName: statementName,
+                        WithEvent: true
+                    }).promise();
+    
+                    collectedResponse.push({
+                        "table_name": copyTableName,
+                        "statement_name": statementName,
+                        "statement_id": execResp.Id,
+                        "manifest_file": manifestKey
+                    });
+                } catch (e) {
+                    await queueLoad(clusterDb, copyTableName, {
+                        ClusterIdentifier: clusterIdentifier,
+                        Database: clusterDb,
+                        Sqls: sqls,
+                        DbUser: RS_DATA_USER,
+                        StatementName: statementName,
+                        WithEvent: true
+                    });
+                }
             }
 
             console.log(collectedResponse);

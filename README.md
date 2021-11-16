@@ -2,8 +2,8 @@
 
 Repository contains a number of utility Lambda functions that supports microbatching as well as bulk loading of data coming into S3. The functions are as follows:
 
-- `loader.handler`: designed to be triggered directly from a SQS queue. The typical flow would be S3 -> SQS -> Lambda. 
-- `retry_microbatch.handler`: designed to allow retry if ever there's a load failure due to `serializable isolation violation` error. This function would be triggered by Amazon EventBridge as a result of a failed execution of the `loader.handler` function. This is a compromise instead of locking the table everytime the microbatch function runs which would compromise the concurrency performance of the table.
+- `loader.handler`: designed to be triggered directly from a SQS queue. The typical flow would be S3 -> SQS -> Lambda. Only once load job per table would execute, if more concurrent load job request for the same table gets triggered, it would be stored in DynamoDB as a pending item.
+- `next_loader.handler`: Once a previous load job completes, the Redshift Data API would emit an event which would trigger this Lambda. The Lambda would check the DynamoDB table if there's any other pending load job for the same table and then execute it.
 - `bulk_loader.handler`: designed to be used separately and triggered either manually or automatically via scheduled job. Recommendation is to use this to load the previous day's data into Redshift.
 
 ## Setting Up the SQS Triggered Function
@@ -40,20 +40,21 @@ Each table that you want to load would have its own SQS queue. In order for the 
 }
 ```
 
-### EventBridge and Retrying
-There would be instances where an execution of `loader.handler` would result in a `serializable isolation violation` error. This means that there's another transaction that is running the `DELETE` or `INSERT` statements. There are 2 ways to address this error, these are as follows:
+### Implication of Concurrent Loads
+There would be instances where an execution of `loader.handler` would result in a `serializable isolation violation` error. This means that there's another transaction that is running the `DELETE` or `INSERT` statements. There are 3 ways to address this error, these are as follows:
 
 1. Execute `LOCK tableName` at the start of the Lambda function. This would force all other ETL jobs for the same table to wait until the currently executing job completes. This would also impact the performance of all other users of the table which includes dashboards and reporting queries. This is the easiest way to fix this error, but has an impact on the performance and concurrency of Redshift.
-2. The second approach is to just retry the job which sounds simple, but requires coordination and state management of which jobs to retry. This is where EventBridge comes in as the Redshift Data API supports emitting status changes to EventBridge when `WithEvent` is set to `true` which is the case in this implementation.
+2. The second approach is to just retry the job which sounds simple, but requires coordination and state management of which jobs to retry. This also means that the load job has run and failed and has to be retried until it succeeds.
+3. The last approach is to only execute one job per table and manage the orchestration so that once a load job completes, the next in queue would execute. This is what the `next_loader.handler` function is doing.
 
-The following is the rule that was used in EventBridge to trigger the `retry_microbatch.handler` function:
+The following is the rule that was used in EventBridge to trigger the `next_loader.handler` function:
 
 ```json
 {
   "source": ["aws.redshift-data"],
   "detail-type": ["Redshift Data Statement Status Change"],
   "detail": {
-    "state": ["FAILED"],
+    "state": ["FINISHED"],
     "statementName": [{
       "prefix": "<REDSHIFT_DB_NAME>/"
     }]
@@ -61,7 +62,13 @@ The following is the rule that was used in EventBridge to trigger the `retry_mic
 }
 ```
 
-Inside the Lambda function, we do a further check that only queries that failed due to `serializable isolation violation` error gets retried. This would avoid infinite loops from happening.
+Inside the Lambda function, the DynamoDB table is used to check PENDING jobs and the other pertinent information such as the location of the manifest file.
+
+### DynamoDB Table
+A DynamoDB table is used to keep track of pending jobs per table. The basic structure of the DynamoDB table are as follows:
+
+- `db_table` (`String`, `Primary Key`)
+- `status_timestamp` (`String`, `Sort Key`)
 
 ### Environment Variables
 The following are the relevant environment variables per Lambda function:
@@ -69,14 +76,17 @@ The following are the relevant environment variables per Lambda function:
 - `loader.handler`
     - `CONFIG_BUCKET`: the bucket name where the JSON config files are stored. Just provide the bucket name, **DO NOT INCLUDE `s3://`**.
     - `CONFIG_PREFIX`: the folder where the JSON config files are stored. Example: `path/to/config/`.
-- `retry_microbatch.hander`
-    - `COPY_IAM_ROLE_ARN`: the ARN of the Redshift IAM Role to be used for the `COPY` command.
+    - `DDB_TRACKER`: the name of the DynamoDB table.
+    - `PENDING_BUCKET`: the bucket name where pending metadata would be stored.
+    - `PENDING_PREFIX`: the folder where the pending metadata would be stored. Example: `path/to/folder/`.
+- `next_loader.hander`
+    - `DDB_TRACKER`: the name of the DynamoDB table.
 
 ### Lambda Timeouts
 The following are the timeout configuration per Lambda function:
 
 - `loader.handler`: 2 minutes
-- `retry_microbatch.hander`: 2 minutes
+- `next_loader.hander`: 2 minutes
 
 ## Bulk Loader
 
