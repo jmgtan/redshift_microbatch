@@ -2,9 +2,22 @@
 
 Repository contains a number of utility Lambda functions that supports microbatching as well as bulk loading of data coming into S3. The functions are as follows:
 
-- `loader.handler`: designed to be triggered directly from a SQS queue. The typical flow would be S3 -> SQS -> Lambda. Only once load job per table would execute, if more concurrent load job request for the same table gets triggered, it would be stored in DynamoDB as a pending item.
-- `next_loader.handler`: Once a previous load job completes, the Redshift Data API would emit an event which would trigger this Lambda. The Lambda would check the DynamoDB table if there's any other pending load job for the same table and then execute it.
-- `bulk_loader.handler`: designed to be used separately and triggered either manually or automatically via scheduled job. Recommendation is to use this to load the previous day's data into Redshift.
+- `functions/MicrobatchLoader/loader.js`: designed to be triggered directly from a SQS queue. The typical flow would be S3 -> SQS -> Lambda. Only once load job per table would execute, if more concurrent load job request for the same table gets triggered, it would be stored in DynamoDB as a pending item.
+- `functions/NextLoader/next_loader.js`: Once a previous load job completes, the Redshift Data API would emit an event which would trigger this Lambda. The Lambda would check the DynamoDB table if there's any other pending load job for the same table and then execute it.
+- `functions/BulkLoader/bulk_loader.js`: designed to be used separately and triggered either manually or automatically via scheduled job. Recommendation is to use this to load the previous day's data into Redshift.
+
+## Deployment Using CDK
+To use the CDK script, execute `npm run deploy`. This will deploy the following:
+
+- IAM Role for the Lambda function
+- DynamoDB Table
+- S3 bucket for configuration as well as pending job metadata
+- All the 3 lambda functions mentioned in the previous section.
+
+After the deployment is done, you need to do the following:
+
+- Add SQS as the trigger for the MicrobatchLoader Lambda function.
+- Add the queue config json files (see the next section for more details) in the newly created S3 bucket from the CDK in the `rs-loader-config/` folder.
 
 ## Setting Up the SQS Triggered Function
 
@@ -19,10 +32,6 @@ Each table that you want to load would have its own SQS queue. In order for the 
 
 ```json
 {
-    "output": {
-        "manifest_bucket": "<BUCKET_NAME>",
-        "manifest_prefix": "<PREFIX_FOLDER_WHERE_TO_STORE_MANIFEST>"
-    },
     "copy": {
         "options": "<COPY_OPTIONS_SPACE_SEPARATED>",
         "role_arn": "<COPY_IAM_ROLE_ARN>",
@@ -79,6 +88,8 @@ The following are the relevant environment variables per Lambda function:
     - `DDB_TRACKER`: the name of the DynamoDB table.
     - `PENDING_BUCKET`: the bucket name where pending metadata would be stored.
     - `PENDING_PREFIX`: the folder where the pending metadata would be stored. Example: `path/to/folder/`.
+    - `MANIFEST_BUCKET`: the bucket name where manifest files would be stored.
+    - `MANIFEST_PREFIX`: the folder where manifest files would be stored. Example: `path/to/folder/`.
 - `next_loader.hander`
     - `DDB_TRACKER`: the name of the DynamoDB table.
 

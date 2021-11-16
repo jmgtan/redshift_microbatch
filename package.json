@@ -1,12 +1,11 @@
 {
-  "name": "redshiftloader",
-  "version": "1.0.0",
-  "description": "Generates manifest file and loads into target Redshift cluster",
-  "main": "loader.js",
-  "author": "Jan Tan",
-  "license": "ISC",
-  "dependencies": {
-    "aws-sdk": "^2.1022.0",
-    "uuid": "^8.3.2"
-  }
+    "name": "redshift_microbatch",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "build-bulk-loader": "cd functions/BulkLoader && npm install",
+        "build-microbatch-loader": "cd functions/MicrobatchLoader && npm install",
+        "build-next-loader": "cd functions/NextLoader && npm install",
+        "deploy": "npm run build-bulk-loader && npm run build-microbatch-loader && npm run build-next-loader && cd infra && cdk deploy"
+    }
 }

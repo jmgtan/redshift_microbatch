@@ -10,6 +10,13 @@ const rsData = new AWS.RedshiftData();
 const ddb = new AWS.DynamoDB();
 const collectedResponse = [];
 
+const manifestBucket = process.env.MANIFEST_BUCKET;
+var manifestPrefix = process.env.MANIFEST_PREFIX;
+
+if (!manifestPrefix.endsWith("/")) {
+    manifestPrefix += "/";
+}
+
 const configBucket = process.env.CONFIG_BUCKET;
 var configPrefix = process.env.CONFIG_PREFIX;
 
@@ -131,8 +138,6 @@ exports.handler = async (event) => {
             for (eventSourceARN in manifestCache) {
                 const config = await loadConfigForQueue(eventSourceARN);
 
-                const manifestBucket = config.output.manifest_bucket;
-                const manifestPrefix = config.output.manifest_prefix;
                 const copyOptions = config.copy.options;
                 const copyRoleArn = config.copy.role_arn;
                 const copyTableName = config.copy.table_name;
@@ -144,7 +149,7 @@ exports.handler = async (event) => {
 
                 const manifest = manifestCache[eventSourceARN];
 
-                const manifestKey = manifestPrefix + uuidv4() + "_" + Date.now();
+                const manifestKey = manifestPrefix + copyTableName + "/" + uuidv4() + "_" + Date.now();
                 const copyStagingTableName = copyTableName+"_"+Date.now();
                 const statementName = clusterDb+"/"+copyStagingTableName;
         
