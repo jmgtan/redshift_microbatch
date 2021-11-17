@@ -3,9 +3,10 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
+        "init-cdk": "cd infra && npm install",
         "build-bulk-loader": "cd functions/BulkLoader && npm install",
         "build-microbatch-loader": "cd functions/MicrobatchLoader && npm install",
         "build-next-loader": "cd functions/NextLoader && npm install",
-        "deploy": "npm run build-bulk-loader && npm run build-microbatch-loader && npm run build-next-loader && cd infra && cdk deploy"
+        "deploy": "npm run build-bulk-loader && npm run build-microbatch-loader && npm run build-next-loader && npm run init-cdk && cd infra && cdk bootstrap && cdk deploy"
     }
 }
