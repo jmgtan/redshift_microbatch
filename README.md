@@ -19,6 +19,9 @@ After the deployment is done, you need to do the following:
 - Add SQS as the trigger for the MicrobatchLoader Lambda function.
 - Add the queue config json files (see the next section for more details) in the newly created S3 bucket from the CDK in the `rs-loader-config/` folder.
 
+### CDK Bootstrapping
+The deployment script will automatically do a CDK bootstrap. If the environment has already been bootstrapped, no changes would be made, but if there's difference in the boostrap template version between the one that is being deployed from the one that has already been deployed, please see the [CDK Bootstrapping Documentation](https://docs.aws.amazon.com/cdk/latest/guide/bootstrapping.html#bootstrapping-templates) for more details.
+
 ## Setting Up the SQS Triggered Function
 
 ### Overview
