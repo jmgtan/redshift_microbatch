@@ -13,6 +13,12 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    const paramStatementNamePrefix = new cdk.CfnParameter(this, 'statementNamePrefix', {
+      type: "String",
+      description: "Statement name prefix filter for EventBridge rule. Set this to the database name. Default value: 'dev'",
+      default: "dev"
+    });
+
     const trackingTable = new dynamodb.Table(this, 'RedshiftLoadTracker', {
       partitionKey: { name: 'db_table', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'status_timestamp', type: dynamodb.AttributeType.STRING },
@@ -94,7 +100,7 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
         detail: {
           state: ["FINISHED"],
           statementName: [{
-            "prefix": "dev/"
+            "prefix": paramStatementNamePrefix.valueAsString + "/"
           }]
         }
       },

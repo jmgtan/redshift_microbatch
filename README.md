@@ -7,7 +7,7 @@ Repository contains a number of utility Lambda functions that supports microbatc
 - `functions/BulkLoader/bulk_loader.js`: designed to be used separately and triggered either manually or automatically via scheduled job. Recommendation is to use this to load the previous day's data into Redshift.
 
 ## Deployment Using CDK
-To use the CDK script, execute `npm run deploy`. This will deploy the following:
+To use the CDK script, execute `npm run deploy -- --parameters statementNamePrefix=<REDSHIFT_DB_NAME>`. This will deploy the following:
 
 - IAM Role for the Lambda function
 - DynamoDB Table
