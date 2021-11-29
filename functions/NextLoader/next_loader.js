@@ -81,7 +81,8 @@ const trackNextExecution = async(dbName, tableName) => {
                                 "S": nextItem.payload_key
                             }
                         },
-                        "TableName": DDB_TRACKER
+                        "TableName": DDB_TRACKER,
+                        "ConditionExpression": "attribute_not_exists(db_table) and attribute_not_exists(status_timestamp)"
                     }
                 }
             ]
@@ -105,22 +106,26 @@ exports.handler = async (event) => {
     console.log("Table Name: "+tableName);
     console.log("Statement Name: "+statementName);
 
-    const nextItem = await trackNextExecution(dbName, tableName);
+    try {
+        const nextItem = await trackNextExecution(dbName, tableName);
 
-    if (nextItem != null) {
-        const pendingPayloadResp = await s3.getObject({Bucket: nextItem.payload_bucket, Key: nextItem.payload_key}).promise();
-        const pendingPayload = JSON.parse(pendingPayloadResp.Body.toString());
+        if (nextItem != null) {
+            const pendingPayloadResp = await s3.getObject({Bucket: nextItem.payload_bucket, Key: nextItem.payload_key}).promise();
+            const pendingPayload = JSON.parse(pendingPayloadResp.Body.toString());
+        
+            const execResp = await rsData.batchExecuteStatement(pendingPayload).promise();
+        
+            const response = {
+                "statement_name": nextItem.statement_name,
+                "statement_id": execResp.Id
+            }
     
-        const execResp = await rsData.batchExecuteStatement(pendingPayload).promise();
+            console.log(response);
     
-        const response = {
-            "statement_name": nextItem.statement_name,
-            "statement_id": execResp.Id
+            return response;
         }
-
-        console.log(response);
-
-        return response;
+    } catch (e) {
+        console.log("TransactError: "+e);
     }
 
     return {};
