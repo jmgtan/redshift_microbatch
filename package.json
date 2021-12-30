@@ -4,9 +4,10 @@
     "private": true,
     "scripts": {
         "init-cdk": "cd infra && npm install",
+        "build-clear-pending-metadata": "cd functions/ClearPendingMetadata && npm install",
         "build-bulk-loader": "cd functions/BulkLoader && npm install",
         "build-microbatch-loader": "cd functions/MicrobatchLoader && npm install",
         "build-next-loader": "cd functions/NextLoader && npm install",
-        "deploy": "npm run build-bulk-loader && npm run build-microbatch-loader && npm run build-next-loader && npm run init-cdk && cd infra && cdk bootstrap && cdk deploy"
+        "deploy": "npm run build-clear-pending-metadata && npm run build-bulk-loader && npm run build-microbatch-loader && npm run build-next-loader && npm run init-cdk && cd infra && cdk bootstrap && cdk deploy"
     }
 }

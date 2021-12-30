@@ -116,5 +116,13 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
       timeout: Duration.minutes(5),
       role: loaderRole
     });
+
+    const clearPendingMetadataFunction = new Function(this, "ClearPendingMetadataFunction", {
+      code: Code.fromAsset(__dirname + "/../../functions/ClearPendingMetadata/"),
+      runtime: Runtime.NODEJS_14_X,
+      handler: "clear_pending_metadata.handler",
+      timeout: Duration.minutes(5),
+      role: loaderRole
+    });
   }
 }
