@@ -47,12 +47,12 @@ exports.handler = async(event) => {
 
         for (var i in batched) {
             const batch = batched[i];
-            const batchRequestParam = {};
-            batchRequestParam[DDB_TRACKER] = [];
+            const batchRequestParam = {"RequestItems": {}};
+            batchRequestParam["RequestItems"][DDB_TRACKER] = [];
 
             for (var j in batch) {
                 const batchItem = batch[j];
-                batchRequestParam[DDB_TRACKER].push({
+                batchRequestParam["RequestItems"][DDB_TRACKER].push({
                     "DeleteRequest": {
                         "Key": batchItem
                     }

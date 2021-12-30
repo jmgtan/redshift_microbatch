@@ -122,6 +122,9 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
       runtime: Runtime.NODEJS_14_X,
       handler: "clear_pending_metadata.handler",
       timeout: Duration.minutes(5),
+      environment: {
+        "DDB_TRACKER": trackingTable.tableName
+      },
       role: loaderRole
     });
   }
