@@ -1,101 +1,9 @@
 const AWS = require("aws-sdk");
 const util = require("util");
+const {loadSQLBuilder, loadTracker} = require("/opt/nodejs/load_sql_builder");
 
-const DDB_TRACKER = process.env.DDB_TRACKER;
-const s3 = new AWS.S3();
-const ddb = new AWS.DynamoDB();
 const rsData = new AWS.RedshiftData();
-
-const trackNextExecution = async(dbName, tableName) => {
-    const params = {
-        "TableName": DDB_TRACKER,
-        "KeyConditionExpression": "db_table = :dbtable AND begins_with(status_timestamp, :status)",
-        "ExpressionAttributeValues": {
-            ":dbtable": {
-                "S": dbName+"#"+tableName
-            },
-            ":status": {
-                "S": "PENDING#"
-            }
-        },
-        "Limit": 1,
-        "ConsistentRead": true
-    }
-
-    const response = await ddb.query(params).promise();
-    const items = response.Items;
-
-    await ddb.deleteItem({
-        "Key": {
-            "db_table": {
-                "S": dbName+"#"+tableName
-            },
-            "status_timestamp": {
-                "S": "RUNNING"
-            }
-        },
-        "TableName": DDB_TRACKER
-    }).promise();
-
-    if (items.length > 0) {
-        const nextItem = {
-            "db_table": items[0].db_table.S,
-            "status_timestamp": items[0].status_timestamp.S,
-            "payload_bucket": items[0].payload_bucket.S,
-            "payload_key": items[0].payload_key.S,
-        };
-
-        nextItem.statement_name = nextItem.status_timestamp.substr(nextItem.status_timestamp.indexOf("#") + 1);
-
-        const transactWriteParams = {
-            "TransactItems": [
-                {
-                    "Delete": {
-                        "Key": {
-                            "db_table": {
-                                "S": nextItem.db_table
-                            },
-                            "status_timestamp": {
-                                "S": nextItem.status_timestamp
-                            }
-                        },
-                        "TableName": DDB_TRACKER
-                    }
-                },
-                {
-                    "Put": {
-                        "Item": {
-                            "db_table": {
-                                "S": nextItem.db_table
-                            },
-                            "status_timestamp": {
-                                "S": "RUNNING"
-                            },
-                            "statement_name": {
-                                "S": nextItem.statement_name
-                            },
-                            "payload_bucket": {
-                                "S": nextItem.payload_bucket
-                            },
-                            "payload_key": {
-                                "S": nextItem.payload_key
-                            }
-                        },
-                        "TableName": DDB_TRACKER,
-                        "ConditionExpression": "attribute_not_exists(db_table) and attribute_not_exists(status_timestamp)"
-                    }
-                }
-            ]
-        };
-
-        await ddb.transactWriteItems(transactWriteParams).promise();
-
-        return nextItem;
-    }
-
-    return null;
-}
-
+const RS_DATA_USER = "redshift_data_api_user";
 exports.handler = async (event) => {
     const detail = event.detail;
     const statementName = detail.statementName;
@@ -107,13 +15,40 @@ exports.handler = async (event) => {
     console.log("Statement Name: "+statementName);
 
     try {
-        const nextItem = await trackNextExecution(dbName, tableName);
+        const nextItem = await loadTracker.trackNextExecution(dbName, tableName);
 
         if (nextItem != null) {
-            const pendingPayloadResp = await s3.getObject({Bucket: nextItem.payload_bucket, Key: nextItem.payload_key}).promise();
-            const pendingPayload = JSON.parse(pendingPayloadResp.Body.toString());
-        
-            const execResp = await rsData.batchExecuteStatement(pendingPayload).promise();
+            const config = await loadSQLBuilder.getConfig(nextItem.event_source_arn);
+
+            const copyOptions = config.copy.options;
+            const copyRoleArn = config.copy.role_arn;
+            const copyTableName = config.copy.table_name;
+            const clusterIdentifier = config.cluster.identifier;
+            const clusterDb = config.cluster.db_name;
+            const mergeDuplicatePks = config.options.merge_duplicate_pks;
+            const mergePk = config.options.merge_pk;
+            const mergeTimestamp = config.options.merge_timestamp;
+            const copyStagingTableName = copyTableName+"_"+Date.now();
+
+            const manifestFiles = [{bucket: nextItem.manifest_bucket, key: nextItem.manifest_key}];
+            const pendingRecords = await loadTracker.trackAllPendingBatch(dbName, tableName);
+            if (pendingRecords && pendingRecords.length > 0) {
+                for (const pendingRecord of pendingRecords) {
+                    manifestFiles.push({
+                        bucket: pendingRecord.manifest_bucket.S,
+                        key: pendingRecord.manifest_key.S
+                    });
+                }
+            }
+
+            const execResp = await rsData.batchExecuteStatement({
+                ClusterIdentifier: clusterIdentifier,
+                Database: clusterDb,
+                Sqls: loadSQLBuilder.generate(copyTableName, copyStagingTableName, mergeDuplicatePks, mergePk, mergeTimestamp, manifestFiles, copyRoleArn, copyOptions),
+                DbUser: RS_DATA_USER,
+                StatementName: statementName,
+                WithEvent: true
+            }).promise();
         
             const response = {
                 "statement_name": nextItem.statement_name,

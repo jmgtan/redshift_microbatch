@@ -1,13 +1,13 @@
 const AWS = require("aws-sdk");
 const util = require("util");
 const {v4:uuidv4} = require("uuid");
+const {loadSQLBuilder, loadTracker} = require("/opt/nodejs/load_sql_builder");
 
 const RS_DATA_USER = "redshift_data_api_user";
-const configCache = {};
+
 const manifestCache = {};
 const s3 = new AWS.S3();
 const rsData = new AWS.RedshiftData();
-const ddb = new AWS.DynamoDB();
 const collectedResponse = [];
 
 const manifestBucket = process.env.MANIFEST_BUCKET;
@@ -15,88 +15,6 @@ var manifestPrefix = process.env.MANIFEST_PREFIX;
 
 if (!manifestPrefix.endsWith("/")) {
     manifestPrefix += "/";
-}
-
-const configBucket = process.env.CONFIG_BUCKET;
-var configPrefix = process.env.CONFIG_PREFIX;
-
-if (!configPrefix.endsWith("/")) {
-    configPrefix += "/";
-}
-
-const pendingBucket = process.env.PENDING_BUCKET;
-var pendingPrefix = process.env.PENDING_PREFIX;
-
-if (!pendingPrefix.endsWith("/")) {
-    pendingPrefix += "/";
-}
-
-const DDB_TRACKER = process.env.DDB_TRACKER;
-
-const loadConfigForQueue = async (eventSourceARN) => {
-    const queue = eventSourceARN.substr(eventSourceARN.lastIndexOf(":") + 1);
-
-    if (!(queue in configCache)) {
-        const configKey = configPrefix + queue + ".json";
-        const configResponse = await s3.getObject({Bucket: configBucket, Key: configKey}).promise();
-        const config = JSON.parse(configResponse.Body.toString());
-
-        configCache[queue] = config;
-    }
-
-    return configCache[queue];
-}
-
-const trackExecution = async(dbName, tableName, statementName) => {
-    await ddb.putItem({
-        "TableName": DDB_TRACKER,
-        "Item": {
-            "db_table": {
-                "S": dbName + "#" + tableName
-            },
-            "status_timestamp": {
-                "S": "RUNNING"
-            },
-            "statement_name": {
-                "S": statementName
-            }
-        },
-        "ConditionExpression": "attribute_not_exists(db_table) and attribute_not_exists(status_timestamp)"
-    }).promise();
-}
-
-const queueLoad = async(dbName, tableName, loadPayload) => {
-    const statementName = loadPayload.StatementName;
-    const statementNamePrefix = dbName+"/";
-    const partialStatementName = statementName.substr(statementName.indexOf(statementNamePrefix) + statementNamePrefix.length);
-
-    const pendingKey = pendingPrefix + dbName + "/" + tableName + "/" + partialStatementName + ".json";
-
-    await s3.putObject({
-        Bucket: pendingBucket,
-        Key: pendingKey,
-        Body: JSON.stringify(loadPayload)
-    }).promise();
-
-    const params = {
-        "TableName": DDB_TRACKER,
-        "Item": {
-            "db_table": {
-                "S": dbName + "#" + tableName
-            },
-            "status_timestamp": {
-                "S": "PENDING#" + statementName
-            },
-            "payload_bucket": {
-                "S": pendingBucket
-            },
-            "payload_key": {
-                "S": pendingKey
-            }
-        }
-    }
-
-    await ddb.putItem(params).promise();
 }
 
 exports.handler = async (event) => {
@@ -136,8 +54,8 @@ exports.handler = async (event) => {
 
         if (Object.keys(manifestCache).length > 0) {
             for (eventSourceARN in manifestCache) {
-                const config = await loadConfigForQueue(eventSourceARN);
-
+                const config = await loadSQLBuilder.getConfig(eventSourceARN);
+                console.log(config);
                 const copyOptions = config.copy.options;
                 const copyRoleArn = config.copy.role_arn;
                 const copyTableName = config.copy.table_name;
@@ -160,40 +78,27 @@ exports.handler = async (event) => {
                 }
         
                 await s3.putObject(generateManifestParams).promise();
-        
-                var sqls = [
-                    util.format("CREATE TEMP TABLE %s (like %s)", copyStagingTableName, copyTableName),
-                    util.format("COPY %s from 's3://%s/%s' iam_role '%s' format as parquet manifest %s", copyStagingTableName, manifestBucket, manifestKey, copyRoleArn, copyOptions)
-                ];
-        
-                if (mergeDuplicatePks) {
-                    sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s and %s.%s < %s.%s", copyTableName, copyStagingTableName, copyTableName, mergePk, copyStagingTableName, mergePk, copyTableName, mergeTimestamp, copyStagingTableName, mergeTimestamp));
-                    sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s and %s.%s >= %s.%s", copyStagingTableName, copyTableName, copyStagingTableName, mergePk, copyTableName, mergePk, copyTableName, mergeTimestamp, copyStagingTableName, mergeTimestamp));
-                } else {
-                    sqls.push(util.format("DELETE from %s using %s where %s.%s=%s.%s and %s.%s=%s.%s", copyTableName, copyStagingTableName, copyTableName, mergePk, copyStagingTableName, mergePk, copyTableName, mergeTimestamp, copyStagingTableName, mergeTimestamp));
-                }
-        
-                sqls.push(util.format("insert into %s with latest_rows as (select %s, max(%s) as latest_time from %s group by %s) select distinct o.* from %s o inner join latest_rows lr on o.%s=lr.%s where o.%s=lr.latest_time",
-                    copyTableName,
-                    mergePk,
-                    mergeTimestamp,
-                    copyStagingTableName,
-                    mergePk,
-                    copyStagingTableName,
-                    mergePk,
-                    mergePk,
-                    mergeTimestamp
-                ));
-        
-                sqls.push(util.format("DROP TABLE %s", copyStagingTableName));
-
                 
                 try {
-                    await trackExecution(clusterDb, copyTableName, statementName);
+                    const manifestFiles = [{bucket: manifestBucket, key: manifestKey}];
+                    await loadTracker.track(clusterDb, copyTableName, statementName);
+                    console.log("Calling Pending Batch");
+                    const pendingRecords = await loadTracker.trackAllPendingBatch(clusterDb, copyTableName);
+                    if (pendingRecords && pendingRecords.length > 0) {
+                        for (const pendingRecord of pendingRecords) {
+                            manifestFiles.push({
+                                bucket: pendingRecord.manifest_bucket.S,
+                                key: pendingRecord.manifest_key.S
+                            });
+                        }
+                    }
+                    console.log("Pending Records");
+                    console.log(pendingRecords);
+
                     const execResp = await rsData.batchExecuteStatement({
                         ClusterIdentifier: clusterIdentifier,
                         Database: clusterDb,
-                        Sqls: sqls,
+                        Sqls: loadSQLBuilder.generate(copyTableName, copyStagingTableName, mergeDuplicatePks, mergePk, mergeTimestamp, manifestFiles, copyRoleArn, copyOptions),
                         DbUser: RS_DATA_USER,
                         StatementName: statementName,
                         WithEvent: true
@@ -206,14 +111,7 @@ exports.handler = async (event) => {
                         "manifest_file": manifestKey
                     });
                 } catch (e) {
-                    await queueLoad(clusterDb, copyTableName, {
-                        ClusterIdentifier: clusterIdentifier,
-                        Database: clusterDb,
-                        Sqls: sqls,
-                        DbUser: RS_DATA_USER,
-                        StatementName: statementName,
-                        WithEvent: true
-                    });
+                    await loadTracker.queue(clusterDb, copyTableName, statementName, manifestBucket, manifestKey, eventSourceARN);
                 }
             }
 

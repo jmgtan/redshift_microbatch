@@ -6,8 +6,8 @@ import * as eb from '@aws-cdk/aws-events';
 import * as targets from '@aws-cdk/aws-events-targets';
 import { Effect, ManagedPolicy } from '@aws-cdk/aws-iam';
 import { NodejsFunction } from '@aws-cdk/aws-lambda-nodejs';
-import { Duration } from '@aws-cdk/core';
-import { Code, Function, Runtime } from '@aws-cdk/aws-lambda';
+import { Duration, RemovalPolicy } from '@aws-cdk/core';
+import { Code, Function, LayerVersion, Runtime } from '@aws-cdk/aws-lambda';
 
 export class RedshiftMicrobatchStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
@@ -65,6 +65,12 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
       inlinePolicies: {inline0: loaderRolePolicy}
     });
 
+    const sqlBuilderLayer = new LayerVersion(this, "LoadSQLBuilderLayer", {
+      removalPolicy: RemovalPolicy.RETAIN,
+      code: Code.fromAsset(__dirname+"/../../layers/LoadSQLBuilder"),
+      compatibleRuntimes: [Runtime.NODEJS_14_X]
+    })
+
     const microbatchLoaderFunction = new Function(this, "MicrobatchLoaderFunction", {
       code: Code.fromAsset(__dirname + "/../../functions/MicrobatchLoader/"),
       runtime: Runtime.NODEJS_14_X,
@@ -74,12 +80,11 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
         "CONFIG_BUCKET": bucket.bucketName,
         "CONFIG_PREFIX": "rs-loader-config/",
         "DDB_TRACKER": trackingTable.tableName,
-        "PENDING_BUCKET": bucket.bucketName,
-        "PENDING_PREFIX": "pending/",
         "MANIFEST_BUCKET": bucket.bucketName,
         "MANIFEST_PREFIX": "manifest_files/"
       },
-      role: loaderRole
+      role: loaderRole,
+      layers: [sqlBuilderLayer]
     });
 
     const nextLoaderFunction = new Function(this, "NextLoaderFunction", {
@@ -88,9 +93,12 @@ export class RedshiftMicrobatchStack extends cdk.Stack {
       handler: "next_loader.handler",
       timeout: Duration.minutes(2),
       environment: {
-        "DDB_TRACKER": trackingTable.tableName
+        "DDB_TRACKER": trackingTable.tableName,
+        "CONFIG_BUCKET": bucket.bucketName,
+        "CONFIG_PREFIX": "rs-loader-config/"
       },
-      role: loaderRole
+      role: loaderRole,
+      layers: [sqlBuilderLayer]
     });
 
     const nextLoaderEvent = new eb.Rule(this, "NextLoaderRule", {

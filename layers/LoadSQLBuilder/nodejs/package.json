@@ -1,0 +1,12 @@
+{
+  "name": "loadsqlbuilder",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.1048.0",
+    "chunk": "^0.0.3"
+  }
+}
